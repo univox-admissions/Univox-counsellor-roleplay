@@ -1,18 +1,22 @@
 import streamlit as st
 from google import genai
-from google.genai import types
-from audio_recorder_streamlit import audio_recorder
+from streamlit_mic_recorder import speech_to_text
 import requests
-import time
 
 st.set_page_config(page_title="UNIVOX Counsellor Simulator", layout="centered")
 st.title("🎓 UNIVOX Counsellor Simulator")
 
+# Webhook to Google Sheets
 SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxxw6STfiO923NiJCTLE-Yujr5ybctx9XnGzs7_rlxxX_JQsz64-DZQpk16tBxpJsGQwA/exec"
 
+# 100% Free Tier Standard Model
+ACTIVE_MODEL = "gemini-2.5-flash"
+
+# Sidebar: Counsellor Identification
 st.sidebar.header("👤 Counsellor Profile")
 counsellor_name = st.sidebar.text_input("Enter Your Name / ID:", placeholder="e.g. Rahul Sharma")
 
+# Expanded Scenarios Library
 scenarios = [
     "1. Working Professional - Online MBA: Asking about UGC-DEB validity, exam modes, and EMI plans.",
     "2. Anxious Parent - B.Tech: Demanding average placement packages, top recruiters, and campus safety.",
@@ -35,45 +39,25 @@ if "current_scenario" not in st.session_state or st.session_state.current_scenar
     st.session_state.current_scenario = persona
     st.session_state.messages = []
 
+# Display conversation
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-st.write("🎙️ **Record voice or type below:**")
-audio_bytes = audio_recorder(text="Click to Record", recording_color="#e74c3c", neutral_color="#2ecc71")
+# Free Browser-Native Speech Recognition (0 API cost, Hindi + English support)
+st.write("🎙️ **Tap to speak (Free Voice-to-Text):**")
+voice_text = speech_to_text(language='hi-IN', start_prompt="🎙️ Start Speaking", stop_prompt="⏹️ Stop Speaking", key='speech_input')
 
 user_input = None
 
-def generate_with_fallback(client, contents):
-    models = ["gemini-2.5-flash", "gemini-2.5-pro"]
-    for m in models:
-        try:
-            return client.models.generate_content(model=m, contents=contents)
-        except Exception as err:
-            if "429" in str(err):
-                time.sleep(2)
-                continue
-            raise err
-    raise Exception("Rate limit reached. Please wait 30 seconds and try again.")
+if voice_text:
+    user_input = voice_text
 
-if audio_bytes:
-    api_key = st.secrets.get("GEMINI_API_KEY", "")
-    if api_key:
-        client = genai.Client(api_key=api_key)
-        try:
-            audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
-            transcription_res = generate_with_fallback(
-                client,
-                ["Transcribe this audio exactly in Hindi/Hinglish/English as spoken by the counsellor:", audio_part]
-            )
-            user_input = transcription_res.text
-        except Exception as e:
-            st.warning("⚡ High server traffic. Please wait 15 seconds and try again.")
-
-text_prompt = st.chat_input("Type your response as counsellor...")
+text_prompt = st.chat_input("Or type your response here...")
 if text_prompt:
     user_input = text_prompt
 
+# AI response logic
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
@@ -82,21 +66,22 @@ if user_input:
     api_key = st.secrets.get("GEMINI_API_KEY", "")
     if api_key:
         client = genai.Client(api_key=api_key)
-        system_instruction = f"You are roleplaying as a prospective student/parent: {persona}. Respond in 1-2 realistic sentences in Hinglish or English matching the counsellor. Show realistic hesitation, objections, and questions."
+        system_instruction = f"You are roleplaying as a prospective student/parent: {persona}. Respond in 1-2 realistic sentences in conversational Hinglish or English matching the counsellor. Show realistic doubts and objections."
         
         chat_context = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
         
         try:
-            response = generate_with_fallback(
-                client,
-                f"System Instruction: {system_instruction}\n\nChat History:\n{chat_context}"
+            response = client.models.generate_content(
+                model=ACTIVE_MODEL,
+                contents=f"System Instruction: {system_instruction}\n\nChat History:\n{chat_context}"
             )
             st.session_state.messages.append({"role": "assistant", "content": response.text})
             with st.chat_message("assistant"):
                 st.write(response.text)
         except Exception as e:
-            st.warning("⚡ Rate limit pause: Please wait 30 seconds before sending the next message.")
+            st.warning("⚡ Free tier rate pause: Please wait 20-30 seconds before sending the next message.")
 
+# Evaluation & Auto-Logging
 if st.sidebar.button("📊 End Call & Score Session"):
     if not counsellor_name:
         st.sidebar.error("⚠️ Please enter your Name in the sidebar before scoring.")
@@ -108,10 +93,14 @@ if st.sidebar.button("📊 End Call & Score Session"):
             eval_prompt = f"Audit this counsellor-student call for {counsellor_name}. Scenario: {persona}\n\nTranscript:\n{transcript}\n\nScore out of 10 on Rapport, Clarity, and Objection Handling. Provide 3 specific tips."
             
             try:
-                eval_res = generate_with_fallback(client, eval_prompt)
+                eval_res = client.models.generate_content(
+                    model=ACTIVE_MODEL,
+                    contents=eval_prompt
+                )
                 st.sidebar.markdown("### 🏆 Scorecard")
                 st.sidebar.write(eval_res.text)
                 
+                # Log to Google Sheets
                 if SHEET_WEBHOOK_URL:
                     payload = {
                         "counsellor_name": counsellor_name,
@@ -121,8 +110,8 @@ if st.sidebar.button("📊 End Call & Score Session"):
                     }
                     try:
                         requests.post(SHEET_WEBHOOK_URL, json=payload, timeout=10)
-                        st.sidebar.success("✅ Session logged to Team Tracker!")
+                        st.sidebar.success("✅ Session logged to Google Sheet!")
                     except Exception as e:
                         st.sidebar.info("Logged locally.")
             except Exception as e:
-                st.sidebar.warning("⚡ Server busy. Please click 'End Call & Score' again in 30 seconds.")
+                st.sidebar.warning("⚡ Please wait 20 seconds and click Score again.")
