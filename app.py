@@ -10,8 +10,8 @@ st.title("🎓 UNIVOX Counsellor Simulator")
 # Webhook to Google Sheets
 SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxxw6STfiO923NiJCTLE-Yujr5ybctx9XnGzs7_rlxxX_JQsz64-DZQpk16tBxpJsGQwA/exec"
 
-# Model definition
-ACTIVE_MODEL = "gemini-2.5-flash"
+# Current active model required by your API key
+ACTIVE_MODEL = "gemini-3.6-flash"
 
 # Sidebar: Counsellor Identification
 st.sidebar.header("👤 Counsellor Profile")
@@ -89,14 +89,16 @@ if user_input:
         
         chat_context = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
         
-        response = client.models.generate_content(
-            model=ACTIVE_MODEL,
-            contents=f"System Instruction: {system_instruction}\n\nChat History:\n{chat_context}"
-        )
-        
-        st.session_state.messages.append({"role": "assistant", "content": response.text})
-        with st.chat_message("assistant"):
-            st.write(response.text)
+        try:
+            response = client.models.generate_content(
+                model=ACTIVE_MODEL,
+                contents=f"System Instruction: {system_instruction}\n\nChat History:\n{chat_context}"
+            )
+            st.session_state.messages.append({"role": "assistant", "content": response.text})
+            with st.chat_message("assistant"):
+                st.write(response.text)
+        except Exception as e:
+            st.error(f"Response generation error: {e}")
 
 # Evaluation & Auto-Logging
 if st.sidebar.button("📊 End Call & Score Session"):
@@ -109,23 +111,26 @@ if st.sidebar.button("📊 End Call & Score Session"):
             transcript = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
             eval_prompt = f"Audit this counsellor-student call for {counsellor_name}. Scenario: {persona}\n\nTranscript:\n{transcript}\n\nScore out of 10 on Rapport, Clarity, and Objection Handling. Provide 3 specific tips."
             
-            eval_res = client.models.generate_content(
-                model=ACTIVE_MODEL,
-                contents=eval_prompt
-            )
-            st.sidebar.markdown("### 🏆 Scorecard")
-            st.sidebar.write(eval_res.text)
-            
-            # Send to Google Sheets
-            if SHEET_WEBHOOK_URL:
-                payload = {
-                    "counsellor_name": counsellor_name,
-                    "scenario": persona,
-                    "evaluation": eval_res.text,
-                    "transcript": transcript
-                }
-                try:
-                    requests.post(SHEET_WEBHOOK_URL, json=payload, timeout=10)
-                    st.sidebar.success("✅ Session logged to Team Tracker!")
-                except Exception as e:
-                    st.sidebar.info("Logged locally.")
+            try:
+                eval_res = client.models.generate_content(
+                    model=ACTIVE_MODEL,
+                    contents=eval_prompt
+                )
+                st.sidebar.markdown("### 🏆 Scorecard")
+                st.sidebar.write(eval_res.text)
+                
+                # Send to Google Sheets
+                if SHEET_WEBHOOK_URL:
+                    payload = {
+                        "counsellor_name": counsellor_name,
+                        "scenario": persona,
+                        "evaluation": eval_res.text,
+                        "transcript": transcript
+                    }
+                    try:
+                        requests.post(SHEET_WEBHOOK_URL, json=payload, timeout=10)
+                        st.sidebar.success("✅ Session logged to Team Tracker!")
+                    except Exception as e:
+                        st.sidebar.info("Logged locally.")
+            except Exception as e:
+                st.sidebar.error(f"Evaluation error: {e}")
