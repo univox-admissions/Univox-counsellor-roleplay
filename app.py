@@ -6,14 +6,11 @@ import requests
 st.set_page_config(page_title="UNIVOX Counsellor Simulator", layout="centered")
 st.title("🎓 UNIVOX Counsellor Simulator")
 
-# Webhook to Google Sheets
 SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxxw6STfiO923NiJCTLE-Yujr5ybctx9XnGzs7_rlxxX_JQsz64-DZQpk16tBxpJsGQwA/exec"
 
-# Sidebar: Counsellor Identification
 st.sidebar.header("👤 Counsellor Profile")
 counsellor_name = st.sidebar.text_input("Enter Your Name / ID:", placeholder="e.g. Vikas Chawla")
 
-# Scenarios Library
 scenarios = [
     "1. Working Professional - Online MBA: Asking about UGC-DEB validity, exam modes, and EMI plans.",
     "2. Anxious Parent - B.Tech: Demanding average placement packages, top recruiters, and campus safety.",
@@ -36,12 +33,10 @@ if "current_scenario" not in st.session_state or st.session_state.current_scenar
     st.session_state.current_scenario = persona
     st.session_state.messages = []
 
-# Display conversation
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-# Free Browser Voice Input
 st.write("🎙️ **Tap to speak (English / Hinglish):**")
 voice_text = speech_to_text(language='en-IN', start_prompt="🎙️ Start Speaking", stop_prompt="⏹️ Stop Speaking", key='speech_input')
 
@@ -54,23 +49,22 @@ text_prompt = st.chat_input("Or type your response here...")
 if text_prompt:
     user_input = text_prompt
 
-# Helper function to generate content across available models
-def call_gemini(api_key, prompt):
-    client = genai.Client(api_key=api_key)
-    # List of models ordered by preference
-    candidate_models = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.5-pro"]
-    last_error = None
-    for model_name in candidate_models:
-        try:
-            res = client.models.generate_content(model=model_name, contents=prompt)
-            if res and res.text:
-                return res.text
-        except Exception as e:
-            last_error = e
-            continue
-    raise last_error
+def get_active_model(client):
+    """Finds an active model available on the user's key dynamically."""
+    try:
+        models = [m.name for m in client.models.list() if "generateContent" in getattr(m, 'supported_actions', []) or "generateContent" in getattr(m, 'supported_generation_methods', [])]
+        if models:
+            return models[0]
+    except Exception:
+        pass
+    return "models/gemini-3.1-pro-preview"
 
-# Process User Message
+def run_genai(api_key, prompt):
+    client = genai.Client(api_key=api_key)
+    target_model = get_active_model(client)
+    res = client.models.generate_content(model=target_model, contents=prompt)
+    return res.text
+
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
@@ -85,15 +79,14 @@ if user_input:
         full_prompt = f"{system_instruction}\n\nChat History:\n{chat_context}"
         
         try:
-            with st.spinner("Student is typing..."):
-                reply_text = call_gemini(api_key, full_prompt)
-            st.session_state.messages.append({"role": "assistant", "content": reply_text})
+            with st.spinner("Student is replying..."):
+                reply = run_genai(api_key, full_prompt)
+            st.session_state.messages.append({"role": "assistant", "content": reply})
             with st.chat_message("assistant"):
-                st.write(reply_text)
-        except Exception as err:
-            st.error(f"Generation error: {err}")
+                st.write(reply)
+        except Exception as e:
+            st.error(f"Error: {e}")
 
-# Evaluation & Sheet Logging
 if st.sidebar.button("📊 End Call & Score Session"):
     if not counsellor_name:
         st.sidebar.error("⚠️ Please enter your Name in the sidebar before scoring.")
@@ -104,8 +97,8 @@ if st.sidebar.button("📊 End Call & Score Session"):
             eval_prompt = f"Audit this counsellor-student call for {counsellor_name}. Scenario: {persona}\n\nTranscript:\n{transcript}\n\nScore out of 10 on Rapport, Clarity, and Objection Handling. Provide 3 specific tips."
             
             try:
-                with st.spinner("Auditing call performance..."):
-                    score_text = call_gemini(api_key, eval_prompt)
+                with st.spinner("Generating scorecard..."):
+                    score_text = run_genai(api_key, eval_prompt)
                 st.sidebar.markdown("### 🏆 Scorecard")
                 st.sidebar.write(score_text)
                 
@@ -118,8 +111,8 @@ if st.sidebar.button("📊 End Call & Score Session"):
                     }
                     try:
                         requests.post(SHEET_WEBHOOK_URL, json=payload, timeout=10)
-                        st.sidebar.success("✅ Session logged to Google Sheet!")
+                        st.sidebar.success("✅ Logged to Sheet!")
                     except Exception:
                         st.sidebar.info("Logged locally.")
-            except Exception as err:
-                st.sidebar.error(f"Audit error: {err}")
+            except Exception as e:
+                st.sidebar.error(f"Scorecard Error: {e}")
