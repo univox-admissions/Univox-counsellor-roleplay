@@ -1,4 +1,4 @@
 streamlit
 google-genai
-audio-recorder-streamlit
 requests
+streamlit-mic-recorder
