@@ -6,17 +6,17 @@ import requests
 st.set_page_config(page_title="UNIVOX Counsellor Simulator", layout="centered")
 st.title("🎓 UNIVOX Counsellor Simulator")
 
-# Webhook to Google Sheets
+# Google Sheets Webhook
 SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxxw6STfiO923NiJCTLE-Yujr5ybctx9XnGzs7_rlxxX_JQsz64-DZQpk16tBxpJsGQwA/exec"
 
-# 100% Free Tier Standard Model
+# Fast, stable free tier model
 ACTIVE_MODEL = "gemini-2.5-flash"
 
-# Sidebar: Counsellor Identification
+# Sidebar: Counsellor Profile
 st.sidebar.header("👤 Counsellor Profile")
-counsellor_name = st.sidebar.text_input("Enter Your Name / ID:", placeholder="e.g. Rahul Sharma")
+counsellor_name = st.sidebar.text_input("Enter Your Name / ID:", placeholder="e.g. Vikas Chawla")
 
-# Expanded Scenarios Library
+# Expanded Scenarios
 scenarios = [
     "1. Working Professional - Online MBA: Asking about UGC-DEB validity, exam modes, and EMI plans.",
     "2. Anxious Parent - B.Tech: Demanding average placement packages, top recruiters, and campus safety.",
@@ -39,14 +39,14 @@ if "current_scenario" not in st.session_state or st.session_state.current_scenar
     st.session_state.current_scenario = persona
     st.session_state.messages = []
 
-# Display conversation
+# Display conversation history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-# Free Browser-Native Speech Recognition (0 API cost, Hindi + English support)
-st.write("🎙️ **Tap to speak (Free Voice-to-Text):**")
-voice_text = speech_to_text(language='hi-IN', start_prompt="🎙️ Start Speaking", stop_prompt="⏹️ Stop Speaking", key='speech_input')
+# English voice-to-text
+st.write("🎙️ **Tap to speak (English / Hinglish):**")
+voice_text = speech_to_text(language='en-IN', start_prompt="🎙️ Start Speaking", stop_prompt="⏹️ Stop Speaking", key='speech_input')
 
 user_input = None
 
@@ -57,7 +57,7 @@ text_prompt = st.chat_input("Or type your response here...")
 if text_prompt:
     user_input = text_prompt
 
-# AI response logic
+# AI Response Generation
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
@@ -66,7 +66,7 @@ if user_input:
     api_key = st.secrets.get("GEMINI_API_KEY", "")
     if api_key:
         client = genai.Client(api_key=api_key)
-        system_instruction = f"You are roleplaying as a prospective student/parent: {persona}. Respond in 1-2 realistic sentences in conversational Hinglish or English matching the counsellor. Show realistic doubts and objections."
+        system_instruction = f"You are roleplaying as a prospective student or parent: {persona}. Respond in 1-2 realistic, conversational sentences in English or Hinglish as appropriate. Ask realistic questions and raise genuine doubts."
         
         chat_context = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
         
@@ -79,9 +79,9 @@ if user_input:
             with st.chat_message("assistant"):
                 st.write(response.text)
         except Exception as e:
-            st.warning("⚡ Free tier rate pause: Please wait 20-30 seconds before sending the next message.")
+            st.warning("⚡ Free tier rate pause: Please wait 20 seconds before your next message.")
 
-# Evaluation & Auto-Logging
+# Evaluation & Sheet Logging
 if st.sidebar.button("📊 End Call & Score Session"):
     if not counsellor_name:
         st.sidebar.error("⚠️ Please enter your Name in the sidebar before scoring.")
@@ -100,7 +100,7 @@ if st.sidebar.button("📊 End Call & Score Session"):
                 st.sidebar.markdown("### 🏆 Scorecard")
                 st.sidebar.write(eval_res.text)
                 
-                # Log to Google Sheets
+                # Send to Google Sheets
                 if SHEET_WEBHOOK_URL:
                     payload = {
                         "counsellor_name": counsellor_name,
