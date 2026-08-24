@@ -1,14 +1,14 @@
 import streamlit as st
 from google import genai
+from google.genai import types
 from audio_recorder_streamlit import audio_recorder
-import io
 import requests
 
 st.set_page_config(page_title="UNIVOX Counsellor Simulator", layout="centered")
 st.title("🎓 UNIVOX Counsellor Simulator")
 
 # Paste your copied Google Apps Script URL inside the quotes below:
-SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxxw6STfi0923NiJCTLE-Yujr5ybctx9XnGzs7_rlxxX_JQsz64-DZQpk16tBxpJsGQwA/exec"
+SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxxw6STfiO923NiJCTLE-Yujr5ybctx9XnGzs7_rlxxX_JQsz64-DZQpk16tBxpJsGQwA/exec"
 
 # Sidebar: Counsellor Identification
 st.sidebar.header("👤 Counsellor Profile")
@@ -52,13 +52,21 @@ if audio_bytes:
     api_key = st.secrets.get("GEMINI_API_KEY", "")
     if api_key:
         client = genai.Client(api_key=api_key)
-        audio_file = io.BytesIO(audio_bytes)
-        audio_part = client.files.upload(file=audio_file, mime_type="audio/wav")
-        transcription_res = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=["Transcribe this audio exactly in Hindi/Hinglish/English as spoken:", audio_part]
-        )
-        user_input = transcription_res.text
+        try:
+            audio_part = types.Part.from_bytes(
+                data=audio_bytes,
+                mime_type="audio/wav"
+            )
+            transcription_res = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[
+                    "Transcribe this audio exactly in Hindi/Hinglish/English as spoken:",
+                    audio_part
+                ]
+            )
+            user_input = transcription_res.text
+        except Exception as e:
+            st.error(f"Voice processing error: {e}")
 
 # Chat input
 text_prompt = st.chat_input("Type your response as counsellor...")
@@ -74,7 +82,7 @@ if user_input:
     api_key = st.secrets.get("GEMINI_API_KEY", "")
     if api_key:
         client = genai.Client(api_key=api_key)
-        system_instruction = f"You are roleplaying as a prospective student/parent: {persona}. Respond in 1-2 realistic sentences in Hinglish or English matching the user."
+        system_instruction = f"You are roleplaying as a prospective student/parent: {persona}. Respond in 1-2 realistic sentences in Hinglish or English matching the counsellor. Show realistic hesitation, objections, and questions."
         
         chat_context = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
         
@@ -106,7 +114,7 @@ if st.sidebar.button("📊 End Call & Score Session"):
             st.sidebar.write(eval_res.text)
             
             # Send to Google Sheets
-            if SHEET_WEBHOOK_URL and "PASTE_" not in SHEET_WEBHOOK_URL:
+            if SHEET_WEBHOOK_URL:
                 payload = {
                     "counsellor_name": counsellor_name,
                     "scenario": persona,
