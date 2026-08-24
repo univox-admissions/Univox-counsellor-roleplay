@@ -7,7 +7,7 @@ import requests
 st.set_page_config(page_title="UNIVOX Counsellor Simulator", layout="centered")
 st.title("🎓 UNIVOX Counsellor Simulator")
 
-# Paste your copied Google Apps Script URL inside the quotes below:
+# Paste your Google Apps Script URL below:
 SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxxw6STfiO923NiJCTLE-Yujr5ybctx9XnGzs7_rlxxX_JQsz64-DZQpk16tBxpJsGQwA/exec"
 
 # Sidebar: Counsellor Identification
@@ -66,7 +66,18 @@ if audio_bytes:
             )
             user_input = transcription_res.text
         except Exception as e:
-            st.error(f"Voice processing error: {e}")
+            # Fallback if specific version is requested by environment
+            try:
+                transcription_res = client.models.generate_content(
+                    model="gemini-1.5-flash",
+                    contents=[
+                        "Transcribe this audio exactly in Hindi/Hinglish/English as spoken:",
+                        audio_part
+                    ]
+                )
+                user_input = transcription_res.text
+            except Exception as inner_e:
+                st.error(f"Voice processing error: {inner_e}")
 
 # Chat input
 text_prompt = st.chat_input("Type your response as counsellor...")
@@ -86,10 +97,16 @@ if user_input:
         
         chat_context = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
         
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=f"System Instruction: {system_instruction}\n\nChat History:\n{chat_context}"
-        )
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=f"System Instruction: {system_instruction}\n\nChat History:\n{chat_context}"
+            )
+        except Exception:
+            response = client.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=f"System Instruction: {system_instruction}\n\nChat History:\n{chat_context}"
+            )
         
         st.session_state.messages.append({"role": "assistant", "content": response.text})
         with st.chat_message("assistant"):
@@ -106,10 +123,17 @@ if st.sidebar.button("📊 End Call & Score Session"):
             transcript = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
             eval_prompt = f"Audit this counsellor-student call for {counsellor_name}. Scenario: {persona}\n\nTranscript:\n{transcript}\n\nScore out of 10 on Rapport, Clarity, and Objection Handling. Provide 3 specific tips."
             
-            eval_res = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=eval_prompt
-            )
+            try:
+                eval_res = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=eval_prompt
+                )
+            except Exception:
+                eval_res = client.models.generate_content(
+                    model="gemini-1.5-flash",
+                    contents=eval_prompt
+                )
+            
             st.sidebar.markdown("### 🏆 Scorecard")
             st.sidebar.write(eval_res.text)
             
