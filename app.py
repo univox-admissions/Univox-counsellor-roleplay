@@ -6,17 +6,14 @@ import requests
 st.set_page_config(page_title="UNIVOX Counsellor Simulator", layout="centered")
 st.title("🎓 UNIVOX Counsellor Simulator")
 
-# Google Sheets Webhook
+# Webhook to Google Sheets
 SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxxw6STfiO923NiJCTLE-Yujr5ybctx9XnGzs7_rlxxX_JQsz64-DZQpk16tBxpJsGQwA/exec"
 
-# Fast, stable free tier model
-ACTIVE_MODEL = "gemini-2.5-flash"
-
-# Sidebar: Counsellor Profile
+# Sidebar: Counsellor Identification
 st.sidebar.header("👤 Counsellor Profile")
 counsellor_name = st.sidebar.text_input("Enter Your Name / ID:", placeholder="e.g. Vikas Chawla")
 
-# Expanded Scenarios
+# Scenarios Library
 scenarios = [
     "1. Working Professional - Online MBA: Asking about UGC-DEB validity, exam modes, and EMI plans.",
     "2. Anxious Parent - B.Tech: Demanding average placement packages, top recruiters, and campus safety.",
@@ -39,12 +36,12 @@ if "current_scenario" not in st.session_state or st.session_state.current_scenar
     st.session_state.current_scenario = persona
     st.session_state.messages = []
 
-# Display conversation history
+# Display conversation
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-# English voice-to-text
+# Free Browser Voice Input
 st.write("🎙️ **Tap to speak (English / Hinglish):**")
 voice_text = speech_to_text(language='en-IN', start_prompt="🎙️ Start Speaking", stop_prompt="⏹️ Stop Speaking", key='speech_input')
 
@@ -57,29 +54,44 @@ text_prompt = st.chat_input("Or type your response here...")
 if text_prompt:
     user_input = text_prompt
 
-# AI Response Generation
+# Helper function to generate content across available models
+def call_gemini(api_key, prompt):
+    client = genai.Client(api_key=api_key)
+    # List of models ordered by preference
+    candidate_models = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.5-pro"]
+    last_error = None
+    for model_name in candidate_models:
+        try:
+            res = client.models.generate_content(model=model_name, contents=prompt)
+            if res and res.text:
+                return res.text
+        except Exception as e:
+            last_error = e
+            continue
+    raise last_error
+
+# Process User Message
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.write(user_input)
 
     api_key = st.secrets.get("GEMINI_API_KEY", "")
-    if api_key:
-        client = genai.Client(api_key=api_key)
-        system_instruction = f"You are roleplaying as a prospective student or parent: {persona}. Respond in 1-2 realistic, conversational sentences in English or Hinglish as appropriate. Ask realistic questions and raise genuine doubts."
-        
+    if not api_key:
+        st.error("API Key missing from Streamlit secrets.")
+    else:
+        system_instruction = f"Roleplay as a student/parent: {persona}. Respond in 1-2 realistic sentences in conversational English or Hinglish."
         chat_context = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
+        full_prompt = f"{system_instruction}\n\nChat History:\n{chat_context}"
         
         try:
-            response = client.models.generate_content(
-                model=ACTIVE_MODEL,
-                contents=f"System Instruction: {system_instruction}\n\nChat History:\n{chat_context}"
-            )
-            st.session_state.messages.append({"role": "assistant", "content": response.text})
+            with st.spinner("Student is typing..."):
+                reply_text = call_gemini(api_key, full_prompt)
+            st.session_state.messages.append({"role": "assistant", "content": reply_text})
             with st.chat_message("assistant"):
-                st.write(response.text)
-        except Exception as e:
-            st.warning("⚡ Free tier rate pause: Please wait 20 seconds before your next message.")
+                st.write(reply_text)
+        except Exception as err:
+            st.error(f"Generation error: {err}")
 
 # Evaluation & Sheet Logging
 if st.sidebar.button("📊 End Call & Score Session"):
@@ -88,30 +100,26 @@ if st.sidebar.button("📊 End Call & Score Session"):
     else:
         api_key = st.secrets.get("GEMINI_API_KEY", "")
         if api_key and st.session_state.messages:
-            client = genai.Client(api_key=api_key)
             transcript = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
             eval_prompt = f"Audit this counsellor-student call for {counsellor_name}. Scenario: {persona}\n\nTranscript:\n{transcript}\n\nScore out of 10 on Rapport, Clarity, and Objection Handling. Provide 3 specific tips."
             
             try:
-                eval_res = client.models.generate_content(
-                    model=ACTIVE_MODEL,
-                    contents=eval_prompt
-                )
+                with st.spinner("Auditing call performance..."):
+                    score_text = call_gemini(api_key, eval_prompt)
                 st.sidebar.markdown("### 🏆 Scorecard")
-                st.sidebar.write(eval_res.text)
+                st.sidebar.write(score_text)
                 
-                # Send to Google Sheets
                 if SHEET_WEBHOOK_URL:
                     payload = {
                         "counsellor_name": counsellor_name,
                         "scenario": persona,
-                        "evaluation": eval_res.text,
+                        "evaluation": score_text,
                         "transcript": transcript
                     }
                     try:
                         requests.post(SHEET_WEBHOOK_URL, json=payload, timeout=10)
                         st.sidebar.success("✅ Session logged to Google Sheet!")
-                    except Exception as e:
+                    except Exception:
                         st.sidebar.info("Logged locally.")
-            except Exception as e:
-                st.sidebar.warning("⚡ Please wait 20 seconds and click Score again.")
+            except Exception as err:
+                st.sidebar.error(f"Audit error: {err}")
